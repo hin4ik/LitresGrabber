@@ -1,0 +1,159 @@
+#!/usr/bin/python3
+'''
+
+Litres grabbing utility GUI version
+
+MinHinProm, 2019
+
+'''
+
+import sys, time, requests, threading
+from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtCore import *
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from gui import *
+
+class MyWin(QtWidgets.QMainWindow):
+    def __init__(self, parent=None):
+        QtWidgets.QWidget.__init__(self, parent)
+        
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+
+        self.LOGIN_URL = "https://www.litres.ru/pages/login/" # Login page URL
+        self.HEADERS = { #Requests headers
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+        }
+        
+
+        self.ui.loginButton.clicked.connect(self.login)
+        self.ui.startButton.clicked.connect(self.grab)
+        
+
+    def login (self): 
+        self.s = requests.Session() # Create client session
+
+        self.ui.loginButton.setEnabled(False)
+        print("Getting CSRF...")
+
+        csrf = ""
+
+        loginData = {
+            'csrf': '',
+            'login': self.ui.login.text(),
+            'pre_action': 'login',
+            'pwd': self.ui.password.text() ,
+            'ref_url': '/',
+            'showpwd': 'on',
+            'timestamp': functions.timestamp(),
+            'utc_offset_min': '180',
+        }
+
+        payload = self.s.post(self.LOGIN_URL, data=loginData, headers=self.HEADERS, allow_redirects=False).text #Request CSRF data
+
+        for i in range(0, len(payload)):
+            if(payload.find("\"csrf\"", i, i + 6) != -1):
+                csrfStart = payload.find("\"", i + 7) + 1
+                csrfEnd = payload.find("\"", csrfStart + 1)
+                csrf = payload[csrfStart:csrfEnd]
+                print("Got CSRF!")
+                print("CSRF:" + csrf)
+                break
+
+        if(csrf == ""): 
+            print("CSRF not found!")
+            print("Login error!")
+            self.ui.loginButton.setEnabled(True)
+            return
+
+        print("Logging in...")
+
+        loginData = {
+            'csrf': csrf,
+            'login': self.ui.login.text(),
+            'pre_action': 'login',
+            'pwd': self.ui.password.text() ,
+            'ref_url': '/',
+            'showpwd': 'on',
+            'timestamp': functions.timestamp(),
+            'utc_offset_min': '180',
+        }
+
+        payload = self.s.post(self.LOGIN_URL, data=loginData, headers=self.HEADERS, allow_redirects=False).text #Login request
+        
+        if (payload == ""): 
+            print("Logged in!")
+            self.ui.startButton.setEnabled(True)
+        else: 
+            print("Login error!")
+            self.ui.loginButton.setEnabled(True)
+            return
+
+    def grab(self):
+        self.ui.startButton.setEnabled(False)
+
+        download_dir = self.ui.destDir.text()
+        start_url = self.ui.startURL.text()
+        end_url = self.ui.endURL.text()
+        start_page = self.ui.rangeStart.value()
+        end_page = self.ui.rangeEnd.value()
+        delay = self.ui.delay.value()
+
+        code_stat = False
+
+        for i in range(start_page, end_page + 1):
+            print("Downloading page " + str(i))
+    
+            while True: 
+                ext = ""
+
+                if (not code_stat):
+                    url = start_url + str(i) + end_url + "jpg"
+                    ext = "jpg"
+
+                elif (code_stat):
+                    url = start_url + str(i) + end_url + "gif"
+                    ext = "gif"
+
+                print("URL: " + url)
+
+                time.sleep(delay) #Delay between requests
+                
+                response = self.s.get(url, headers=self.HEADERS)
+
+                if(response.status_code == 200): 
+                    if(response.headers.get("Content-Type") == "image/jpeg, image/jpeg" or response.headers.get("Content-Type") == "image/gif, image/gif"):
+                        f = open(download_dir + "page_" + str(i) + "." + ext, "wb")
+                        f.write(response.content)
+                        f.close()
+                        print("Downloaded!")
+                        break
+                    print("Server returned wrong Content-Type: " + response.headers.get("Content-Type"))
+
+                elif (response.status_code == 500):
+                    print("Server returned 500 status code! Waiting for one minute...")
+                    time.sleep(60)
+                else:
+                    print("Got error code: " +  str(response.status_code))
+                    code_stat = not code_stat
+
+
+        print("Download complete!")
+        self.ui.startButton.setEnabled(True)
+
+        
+
+class functions():
+    def timestamp():
+        return str(int(time.time() * 1000))
+
+
+
+if __name__=="__main__":
+    app = QtWidgets.QApplication(sys.argv)
+    myapp = MyWin()
+    myapp.show()
+    sys.exit(app.exec_())
